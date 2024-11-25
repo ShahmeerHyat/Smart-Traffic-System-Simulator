@@ -1,10 +1,14 @@
 #include <iostream>
-#include <string>
+#include "stack.h"
+#include "doublylinkedlist.h"
+#include "avltree.h"
+#include "queue.h" 
+
 
 using namespace std;
 
 int main() {
-    cout << "Hello, World!" << endl;
-    // Your code goes here
-    return 0;
+   
+
+
 }
