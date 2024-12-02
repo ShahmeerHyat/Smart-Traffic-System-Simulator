@@ -3,7 +3,7 @@
 
 #include "queue.h"
 #include "stack.h"
-#include "doublylinkedlist.h"
+#include "linkedList.h"
 
 namespace std
 {
@@ -17,7 +17,7 @@ namespace std
     class Graph
     {
     private:
-        DoublyLinkedList<T> *adjList;
+        LinkedList<Pair<int, int>> *adjList;
         size_t nodeCount_;
         size_t edgeCount_;
         size_t maxNodes;
@@ -25,7 +25,7 @@ namespace std
     public:
         Graph(size_t maxNodes) : maxNodes(maxNodes), nodeCount_(0), edgeCount_(0)
         {
-            adjList = new DoublyLinkedList<T>[maxNodes];
+            adjList = new LinkedList<Pair<int, int>>[maxNodes];
         }
 
         ~Graph()
@@ -41,16 +41,16 @@ namespace std
             }
         }
 
-        void addEdge(int node1, int node2, bool isDirected = false)
+        void addEdge(int node1, int node2, int weight, bool isDirected = false)
         {
             if (node1 < maxNodes && node2 < maxNodes)
             {
-                adjList[node1].insertAtEnd(node2);
+                adjList[node1].insertAtEnd(Pair<int, int>(node2, weight));
                 edgeCount_++;
 
                 if (!isDirected)
                 {
-                    adjList[node2].insertAtEnd(node1);
+                    adjList[node2].insertAtEnd(Pair<int, int>(node1, weight));
                     edgeCount_++;
                 }
             }
@@ -59,12 +59,12 @@ namespace std
         void depthFirstSearch(int startNode)
         {
             bool *visited = new bool[maxNodes]();
-            Stack<T> stack;
+            Stack<int> stack;
             stack.push(startNode);
 
             while (!stack.empty())
             {
-                T node = stack.top();
+                int node = stack.top();
                 stack.pop();
 
                 if (!visited[node])
@@ -73,11 +73,11 @@ namespace std
                     visited[node] = true;
                 }
 
-                for (T adj : adjList[node])
+                for (Pair<int, int> adj : adjList[node])
                 {
-                    if (!visited[adj])
+                    if (!visited[adj.first])
                     {
-                        stack.push(adj);
+                        stack.push(adj.first);
                     }
                 }
             }
@@ -88,23 +88,23 @@ namespace std
         void breadthFirstSearch(int startNode)
         {
             bool *visited = new bool[maxNodes]();
-            Queue<T> queue;
+            Queue<int> queue;
 
             queue.push(startNode);
             visited[startNode] = true;
 
             while (!queue.empty())
             {
-                T node = queue.front();
+                int node = queue.front();
                 queue.pop();
                 cout << node << " ";
 
-                for (T adj : adjList[node])
+                for (Pair<int, int> adj : adjList[node])
                 {
-                    if (!visited[adj])
+                    if (!visited[adj.first])
                     {
-                        queue.push(adj);
-                        visited[adj] = true;
+                        queue.push(adj.first);
+                        visited[adj.first] = true;
                     }
                 }
             }
@@ -112,26 +112,49 @@ namespace std
             delete[] visited;
         }
 
-        bool hasEdge(int node1, int node2) const
+        void dijkstra(int startNode)
         {
-            for (T adj : adjList[node1])
+            int *distances = new int[maxNodes];
+            bool *visited = new bool[maxNodes]();
+            for (size_t i = 0; i < maxNodes; i++)
+                distances[i] = INF;
+
+            distances[startNode] = 0;
+            Queue<int> queue;
+            queue.push(startNode);
+
+            while (!queue.empty())
             {
-                if (adj == node2)
+                int current = queue.front();
+                queue.pop();
+
+                if (visited[current])
+                    continue;
+                visited[current] = true;
+
+                for (Pair<int, int> adj : adjList[current])
                 {
-                    return true;
+                    int neighbor = adj.first;
+                    int weight = adj.second;
+
+                    if (distances[current] + weight < distances[neighbor])
+                    {
+                        distances[neighbor] = distances[current] + weight;
+                        queue.push(neighbor);
+                    }
                 }
             }
-            return false;
-        }
 
-        size_t nodeCount() const
-        {
-            return nodeCount_;
-        }
+            for (size_t i = 0; i < maxNodes; i++)
+            {
+                if (distances[i] == INF)
+                    cout << "Node " << i << ": INF" << endl;
+                else
+                    cout << "Node " << i << ": " << distances[i] << endl;
+            }
 
-        size_t edgeCount() const
-        {
-            return edgeCount_;
+            delete[] distances;
+            delete[] visited;
         }
     };
 
