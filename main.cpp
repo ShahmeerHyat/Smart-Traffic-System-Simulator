@@ -8,8 +8,7 @@
 #include "hashtable.h"
 #include "heap.h"
 #include "graph.h"
-
-
+#define MAX_PATH_LENGTH 26
 
 using namespace std;
 
@@ -75,15 +74,111 @@ void loadRoadNetwork(DirectedWeightedGraph& graph, const string& filename) {
 }
 
 
-int main() {
+class Vehicle {
+public:
+    string vehicleID;      // Vehicle ID (e.g., "V1", "V2")
+    int currentNode;       // Current intersection/node (represented as an integer)
+    int destinationNode;   // Destination intersection/node (represented as an integer)
+    bool isMoving;         // Flag to check if the vehicle is still moving
 
-    DirectedWeightedGraph graph(26);
+   
+    Vehicle(string id, int start, int end)
+        : vehicleID(id), currentNode(start), destinationNode(end), isMoving(true) {}
+
+    
+    void move(DirectedWeightedGraph& graph) {
+        int path[MAX_PATH_LENGTH];  // Array to store the path
+        int pathLength = graph.dijkstra(currentNode, destinationNode, path);  // Get the shortest path
+
+        if (pathLength > 0 && isMoving) {
+            // Move the vehicle along the path (just move one step for simplicity)
+            currentNode = path[1];  // Move to the next intersection in the path
+
+            // Print the vehicle's movement
+            cout << "Vehicle " << vehicleID << " moved to intersection " << (char)(currentNode + 'A') << endl;
+
+            // Check if the vehicle has reached its destination
+            if (currentNode == destinationNode) {
+                isMoving = false;
+                cout << "Vehicle " << vehicleID << " has reached its destination!" << endl;
+            }
+        } else {
+            isMoving = false; // If no valid path, stop the vehicle
+            cout << "Vehicle " << vehicleID << " cannot move. No valid path!" << endl;
+        }
+    }
+
+    // Get the current position of the vehicle as a character (A-Z)
+    char getCurrentPosition() const {
+        return (char)(currentNode + 'A');
+    }
+
+    // Check if the vehicle has reached its destination
+    bool hasReachedDestination() const {
+        return currentNode == destinationNode;
+    }
+
+    // Display vehicle details
+    void displayVehicleInfo() const {
+        cout << "Vehicle " << vehicleID << " is currently at intersection " << getCurrentPosition()
+             << " and heading to intersection " << (char)(destinationNode + 'A') << endl;
+    }
+};
+
+void loadVehicles(DirectedWeightedGraph& graph, const string& filename, CustomQueue<Vehicle>& vehicleQueue) {
+    ifstream file(filename);
+    string line;
+
+    
+    if (!file.is_open()) {
+        cout << "Error opening file: " << filename << endl;
+        return;
+    }
+
+    
+    while (getline(file, line)) {
+        if (line.empty()) continue;  
+
+        stringstream ss(line);  
+        string vehicleID, startIntersection, endIntersection;
+
+    
+        getline(ss, vehicleID, ',');  
+        getline(ss, startIntersection, ',');  
+        getline(ss, endIntersection, ',');  
+
+       
+        int start = startIntersection[0] - 'A';
+        int end = endIntersection[0] - 'A';
+
+        // Create a new Vehicle object and enqueue it into the custom queue
+        Vehicle newVehicle(vehicleID, start, end);
+        vehicleQueue.enqueue(newVehicle);  
+
+      
+        cout << "Loaded vehicle " << vehicleID << " from " << startIntersection
+             << " to " << endIntersection << endl;
+    }
+
+    file.close();  
+}
+
+
+int main() {
+    DirectedWeightedGraph graph(26);  // 26 intersections (A-Z)
     loadRoadNetwork(graph, "road_network.csv");
 
     graph.displayGraph();
 
-    // Example: placeholder right now for djkistras 
-    graph.dijkstra(0);
+  
+    CustomQueue<Vehicle> vehicleQueue;  // Custom Queue for vehicles
+    loadVehicles(graph, "vehicles.csv", vehicleQueue);
+
+    // Move vehicles one step at a time
+    while (!vehicleQueue.isEmpty()) {
+        Vehicle vehicle = vehicleQueue.dequeue(); 
+        vehicle.move(graph);  // Move the vehicle to the next intersection based on Dijkstra
+    }
 
     return 0;
 }
