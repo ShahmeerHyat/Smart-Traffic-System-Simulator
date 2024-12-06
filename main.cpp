@@ -1,184 +1,435 @@
 #include <iostream>
 #include <fstream>
 #include <sstream>
-#include "stack.h"
-#include "doublylinkedlist.h"
-#include "avltree.h"
-#include "queue.h" 
+#include <ctime>
+#include <chrono>
+#include <thread>
+#include <conio.h>
+#include "graph.h"
+#include "queue.h"
 #include "hashtable.h"
 #include "heap.h"
-#include "graph.h"
-#define MAX_PATH_LENGTH 26
+#include "doublylinkedlist.h"
 
 using namespace std;
 
+const string RESET = "\033[0m";
+const string RED = "\033[31m";
+const string GREEN = "\033[32m";
+const string YELLOW = "\033[33m";
 
-// Function to load the road network from a CSV file and add edges to the graph
-void loadRoadNetwork(DirectedWeightedGraph& graph, const string& filename) {
-    ifstream file(filename);
-    string line;
+struct TrafficSignal {
+    char intersection;
+    bool isGreen;
+    int greenDuration;
+    time_t lastChange;
+};
 
+struct Vehicle {
+    string id;
+    char start;
+    char end;
+    LinkedList<char> path;
+    LinkedList<int> timings;
+    int currentPosition;
+    int timeInCurrentSegment;
+    bool inTransit;
+};
 
-    string intersections[26]; // 'A' to 'Z' 
-    int numIntersections = 0;  // number of unique intersections
+class SignalManagementSystem {
+private:
+    HashTable<char, TrafficSignal*> signals;
 
-    // First pass: get intersections
-    while (getline(file, line)) {
-        if (line.empty()) continue;
-        stringstream ss(line);
-        string intersection1, intersection2;
-        int travelTime;
-
-        getline(ss, intersection1, ',');  // Intersection1
-        getline(ss, intersection2, ',');  // Intersection2
-        ss >> travelTime;                 // TravelTime
-
-        // Assign indices to the intersections if not already assigned
-        bool found1 = false, found2 = false;
-        int u, v;
-
-        // Check and assign index for intersection1
-        for (u = 0; u < numIntersections; ++u) {
-            if (intersections[u] == intersection1) {
-                found1 = true;
-                break;
-            }
-        }
-        if (!found1) {
-            intersections[numIntersections] = intersection1;
-            u = numIntersections;
-            numIntersections++;
-        }
-
-        // Check and assign index for intersection2
-        for (v = 0; v < numIntersections; ++v) {
-            if (intersections[v] == intersection2) {
-                found2 = true;
-                break;
-            }
-        }
-        if (!found2) {
-            intersections[numIntersections] = intersection2;
-            v = numIntersections;
-            numIntersections++;
-        }
-
-        // Add the edge to the graph using the indices
-        graph.addEdge(u, v, travelTime);
-
-        //  Print road added
-        cout << "Adding edge: " << intersection1 << " (" << u << ") -> " << intersection2 << " (" << v << ") with travel time " << travelTime << endl;
+public:
+  bool getSignalStatus(char intersection, TrafficSignal*& signal) {
+    return signals.get(intersection, signal);
+}
+    void addSignal(char intersection, int duration) {
+        TrafficSignal* signal = new TrafficSignal{
+            intersection,
+            false,
+            duration,
+            time(nullptr)
+        };
+        signals.insert(intersection, signal);
     }
 
-    file.close();
+
+  // In SignalManagementSystem
+void processSignals() {
+    time_t currentTime = time(nullptr);
+    for(char i = 'A'; i <= 'Z'; i++) {
+        TrafficSignal* signal;
+        if(signals.get(i, signal)) {
+            if(difftime(currentTime, signal->lastChange) >= signal->greenDuration) {
+                signal->isGreen = !signal->isGreen;
+                signal->lastChange = currentTime;
+            }
+        }
+    }
 }
 
+void emergencyOverride(char intersection) {
+    TrafficSignal* signal;
+    if(signals.get(intersection, signal)) {
+        signal->isGreen = true;
+        signal->lastChange = time(nullptr);
+    }
+}
 
-class Vehicle {
-public:
-    string vehicleID;      // Vehicle ID (e.g., "V1", "V2")
-    int currentNode;       // Current intersection/node (represented as an integer)
-    int destinationNode;   // Destination intersection/node (represented as an integer)
-    bool isMoving;         // Flag to check if the vehicle is still moving
-
+void displaySignalStatus() {
+   cout << "\nTraffic Signal Status:\n";
+   cout << "=====================\n";
+   time_t currentTime = time(nullptr);
+   TrafficSignal* signal;
    
-    Vehicle(string id, int start, int end)
-        : vehicleID(id), currentNode(start), destinationNode(end), isMoving(true) {}
+   for(char i = 'A'; i <= 'Z'; i++) {
+       if(signals.get(i, signal)) {
+           int timeLeft = signal->greenDuration - difftime(currentTime, signal->lastChange);
+           cout << "Intersection " << i << ": "
+                << (signal->isGreen ? GREEN + "GREEN" : RED + "RED") << RESET 
+                << " (" << timeLeft << " seconds until change)" << endl;
+       }
+   }
+}
+};
 
-    
-    void move(DirectedWeightedGraph& graph) {
-        int path[MAX_PATH_LENGTH];  // Array to store the path
-        int pathLength = graph.dijkstra(currentNode, destinationNode, path);  // Get the shortest path
+class VehicleRoutingSystem {
+private:
+    DirectedWeightedGraph* graph;
+    SignalManagementSystem* signals;
+    HashTable<string, Vehicle> vehicles;
+    HashTable<char, int> congestionLevels;
+    LinkedList<string> vehicleIds;
 
-        if (pathLength > 0 && isMoving) {
-            // Move the vehicle along the path (just move one step for simplicity)
-            currentNode = path[1];  // Move to the next intersection in the path
+    int getIndex(char id) { return id - 'A'; }
+    char getId(int index) { return static_cast<char>('A' + index); }
 
-            // Print the vehicle's movement
-            cout << "Vehicle " << vehicleID << " moved to intersection " << (char)(currentNode + 'A') << endl;
+public:
+   VehicleRoutingSystem(DirectedWeightedGraph* g, SignalManagementSystem* s) 
+        : graph(g), signals(s) {}
 
-            // Check if the vehicle has reached its destination
-            if (currentNode == destinationNode) {
-                isMoving = false;
-                cout << "Vehicle " << vehicleID << " has reached its destination!" << endl;
+    HashTable<char, int>& getCongestionLevels() {
+        return congestionLevels;
+    }
+
+    void addVehicle(const string& id, char start, char end) {
+        Vehicle v{id, start, end, LinkedList<char>(), LinkedList<int>(), 0, 0, true};
+        calculateRoute(v);
+        vehicles.insert(id, v);
+        vehicleIds.insertAtEnd(id);
+    }
+
+    void calculateRoute(Vehicle& vehicle) {
+        int path[100];
+        int pathLength = graph->dijkstra(
+            getIndex(vehicle.start),
+            getIndex(vehicle.end),
+            path
+        );
+
+        vehicle.path.clear();
+        vehicle.timings.clear();
+
+        for(int i = 0; i < pathLength; i++) {
+            vehicle.path.insertAtEnd(getId(path[i]));
+            if(i < pathLength - 1) {
+                GNode* edges = graph->getEdges(path[i]);
+                while(edges != nullptr) {
+                    if(edges->vertex == path[i+1]) {
+                        vehicle.timings.insertAtEnd(edges->weight);
+                        break;
+                    }
+                    edges = edges->next;
+                }
             }
-        } else {
-            isMoving = false; // If no valid path, stop the vehicle
-            cout << "Vehicle " << vehicleID << " cannot move. No valid path!" << endl;
         }
     }
 
-    // Get the current position of the vehicle as a character (A-Z)
-    char getCurrentPosition() const {
-        return (char)(currentNode + 'A');
+    void updateAllVehicles() {
+        Node<string>* current = vehicleIds.head;
+        while(current != nullptr) {
+            updateVehiclePosition(current->data);
+            current = current->next;
+        }
     }
 
-    // Check if the vehicle has reached its destination
-    bool hasReachedDestination() const {
-        return currentNode == destinationNode;
+   void updateVehiclePosition(const string& id) {
+    Vehicle v;
+    if(vehicles.get(id, v)) {
+        if(!v.inTransit) return;
+
+        // Get current signal status
+        TrafficSignal* signal;
+        char currentLocation = getCurrentLocation(v);
+        if(signals->getSignalStatus(currentLocation, signal)) {
+            if(!signal->isGreen) {
+                return; // Don't move if signal is red
+            }
+        }
+
+        v.timeInCurrentSegment++;
+        Node<int>* timingNode = v.timings.head;
+        for(int i = 0; i < v.currentPosition; i++) {
+            if(timingNode) timingNode = timingNode->next;
+        }
+
+        if(timingNode && v.timeInCurrentSegment >= timingNode->data) {
+            v.timeInCurrentSegment = 0;
+            v.currentPosition++;
+            updateCongestionLevels(v);
+            if(v.currentPosition >= v.path.countNodes() - 1) {
+                v.inTransit = false;
+            }
+        }
+        vehicles.insert(id, v);
+    }
+}
+
+    void updateCongestionLevels(const Vehicle& v) {
+        char currentLocation = getCurrentLocation(v);
+        int count;
+        if(congestionLevels.get(currentLocation, count)) {
+            congestionLevels.insert(currentLocation, count + 1);
+        } else {
+            congestionLevels.insert(currentLocation, 1);
+        }
     }
 
-    // Display vehicle details
-    void displayVehicleInfo() const {
-        cout << "Vehicle " << vehicleID << " is currently at intersection " << getCurrentPosition()
-             << " and heading to intersection " << (char)(destinationNode + 'A') << endl;
+    char getCurrentLocation(const Vehicle& v) {
+        Node<char>* current = v.path.head;
+        for(int i = 0; i < v.currentPosition && current; i++) {
+            current = current->next;
+        }
+        return current ? current->data : v.start;
+    }
+
+    void displayVehicles() {
+        Node<string>* current = vehicleIds.head;
+        while(current != nullptr) {
+            displayVehicleStatus(current->data);
+            current = current->next;
+        }
+    }
+
+    void displayVehicleStatus(const string& id) {
+        Vehicle v;
+        if(vehicles.get(id, v)) {
+            cout << "\nVehicle " << id << ":\n";
+            
+            if(!v.inTransit && v.currentPosition >= v.path.countNodes() - 1) {
+                cout << "Status: ARRIVED at destination " << v.end << "\n";
+                return;
+            }
+
+            Node<char>* pathNode = v.path.head;
+            Node<int>* timingNode = v.timings.head;
+            
+            for(int i = 0; i <= v.currentPosition && pathNode; i++) {
+                if(i < v.currentPosition) {
+                    cout << pathNode->data << " -> ";
+                    pathNode = pathNode->next;
+                    if(timingNode) timingNode = timingNode->next;
+                }
+            }
+            
+            if(pathNode && pathNode->next) {
+                cout << RED << pathNode->data << " -> " << pathNode->next->data << RESET;
+                if(timingNode) {
+                    cout << " (" << v.timeInCurrentSegment << "/" << timingNode->data << " seconds)";
+                }
+            }
+        }
     }
 };
 
-void loadVehicles(DirectedWeightedGraph& graph, const string& filename, CustomQueue<Vehicle>& vehicleQueue) {
-    ifstream file(filename);
-    string line;
+class CityTrafficSystem {
+private:
+    DirectedWeightedGraph* graph;
+    int numIntersections;
+    VehicleRoutingSystem* router;
+    SignalManagementSystem* signalManager;
 
+    int getIndex(char id) { return id - 'A'; }
+    char getId(int index) { return static_cast<char>('A' + index); }
+
+    void calculateNumIntersections(const string& filename) {
+        ifstream file(filename);
+        if (!file.is_open()) {
+            cerr << "Failed to open file: " << filename << endl;
+            return;
+        }
+
+        string line;
+        char maxIntersection = 'A';
+        
+        while (getline(file, line)) {
+            if (line.empty()) continue;
+
+            stringstream ss(line);
+            string from, to;
+            if (getline(ss, from, ',') && getline(ss, to, ',')) {
+                maxIntersection = max(maxIntersection, from[0]);
+                maxIntersection = max(maxIntersection, to[0]);
+            }
+        }
+        
+        numIntersections = getIndex(maxIntersection) + 1;
+        file.close();
+    }
     
-    if (!file.is_open()) {
-        cout << "Error opening file: " << filename << endl;
-        return;
+    void loadRoadNetwork(const string& filename) {
+        ifstream file(filename);
+        if (!file.is_open()) {
+            cerr << "Failed to open file: " << filename << endl;
+            return;
+        }
+        
+        string line;
+        while (getline(file, line)) {
+            if (line.empty()) continue;
+            
+            stringstream ss(line);
+            string from, to, weight;
+            
+            if (getline(ss, from, ',') && getline(ss, to, ',') && getline(ss, weight, ',')) {
+                try {
+                    int w = stoi(weight);
+                    graph->addEdge(getIndex(from[0]), getIndex(to[0]), w);
+                } catch(const exception& e) {
+                    cerr << "Error parsing line: " << line << endl;
+                }
+            }
+        }
+        file.close();
+    }
+
+    void loadVehicles(const string& filename) {
+        ifstream file(filename);
+        if (!file.is_open()) {
+            cerr << "Failed to open file: " << filename << endl;
+            return;
+        }
+        
+        string line;
+        while (getline(file, line)) {
+            if (line.empty()) continue;
+            
+            stringstream ss(line);
+            string id, start, end;
+            
+            if (getline(ss, id, ',') && getline(ss, start, ',') && getline(ss, end, ',')) {
+                try {
+                    router->addVehicle(id, start[0], end[0]);
+                } catch(const exception& e) {
+                    cerr << "Error adding vehicle: " << line << endl;
+                }
+            }
+        }
+        file.close();
+    }
+
+    void loadTrafficSignals(const string& filename) {
+        ifstream file(filename);
+        if (!file.is_open()) {
+            cerr << "Failed to open file: " << filename << endl;
+            return;
+        }
+        
+        string line;
+        while (getline(file, line)) {
+            if (line.empty()) continue;
+            
+            stringstream ss(line);
+            string intersection, greenTime;
+            
+            if (getline(ss, intersection, ',') && getline(ss, greenTime, ',')) {
+                try {
+                    signalManager->addSignal(intersection[0], stoi(greenTime));
+                } catch(const exception& e) {
+                    cerr << "Error adding signal: " << line << endl;
+                }
+            }
+        }
+        file.close();
+    }
+
+public:
+    CityTrafficSystem() : graph(nullptr), numIntersections(0), router(nullptr), signalManager(nullptr) {}
+    
+    ~CityTrafficSystem() {
+        delete graph;
+        delete router;
+        delete signalManager;
     }
 
     
-    while (getline(file, line)) {
-        if (line.empty()) continue;  
+       void initializeFromFile(const string& filename) {
+    calculateNumIntersections(filename);
+    cout << "Number of intersections: " << numIntersections << endl;
+    graph = new DirectedWeightedGraph(numIntersections);
+    loadRoadNetwork(filename);
+    signalManager = new SignalManagementSystem();
+    loadTrafficSignals("traffic_signals.csv");
+    router = new VehicleRoutingSystem(graph, signalManager);  // Move this after signalManager initialization
+    loadVehicles("vehicles.csv");
 
-        stringstream ss(line);  
-        string vehicleID, startIntersection, endIntersection;
+    }
 
-    
-        getline(ss, vehicleID, ',');  
-        getline(ss, startIntersection, ',');  
-        getline(ss, endIntersection, ',');  
+    void displayNetwork() {
+        if (!graph) {
+            cout << "Network not initialized!" << endl;
+            return;
+        }
 
+        cout << "\nCity Traffic Network Structure:" << endl;
+        cout << "================================" << endl;
+
+        for (int i = 0; i < numIntersections; i++) {
+            char intersection = getId(i);
+            cout << "\nIntersection " << intersection << " connects to:" << endl;
+
+            GNode* current = graph->getEdges(i);
+            while (current != nullptr) {
+                char toIntersection = getId(current->vertex);
+                cout << "  -> " << toIntersection 
+                     << " (Travel time: " << current->weight << " seconds)" << endl;
+                current = current->next;
+            }
+        }
+    }
+
+    void startSimulation() {
        
-        int start = startIntersection[0] - 'A';
-        int end = endIntersection[0] - 'A';
+        cout << "\nPress any intersection letter (A-Z) for emergency override" << endl;
+        cout << "Press ESC to exit" << endl;
 
-        // Create a new Vehicle object and enqueue it into the custom queue
-        Vehicle newVehicle(vehicleID, start, end);
-        vehicleQueue.enqueue(newVehicle);  
+        while(true) {
+            if(_kbhit()) {
+                char ch = _getch();
+                if(ch == 27) break;  // ESC key
+                ch = toupper(ch);
+                if(ch >= 'A' && ch <= 'Z') {
+                    signalManager->emergencyOverride(ch);
+                }
+            }
 
-      
-        cout << "Loaded vehicle " << vehicleID << " from " << startIntersection
-             << " to " << endIntersection << endl;
+            system("cls");
+            displayNetwork();
+            signalManager->processSignals();
+            signalManager->displaySignalStatus();
+            cout << "\nVehicle Positions:\n";
+            cout << "=================\n";
+            router->displayVehicles();
+            router->updateAllVehicles();
+            this_thread::sleep_for(chrono::seconds(1));
+        }
     }
-
-    file.close();  
-}
-
+};
 
 int main() {
-    DirectedWeightedGraph graph(26);  // 26 intersections (A-Z)
-    loadRoadNetwork(graph, "road_network.csv");
-
-    graph.displayGraph();
-
-  
-    CustomQueue<Vehicle> vehicleQueue;  // Custom Queue for vehicles
-    loadVehicles(graph, "vehicles.csv", vehicleQueue);
-
-    // Move vehicles one step at a time
-    while (!vehicleQueue.isEmpty()) {
-        Vehicle vehicle = vehicleQueue.dequeue(); 
-        vehicle.move(graph);  // Move the vehicle to the next intersection based on Dijkstra
-    }
-
+    CityTrafficSystem system;
+    system.initializeFromFile("road_network.csv");
+    system.startSimulation();
     return 0;
 }
