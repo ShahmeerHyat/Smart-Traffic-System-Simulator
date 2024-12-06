@@ -377,6 +377,62 @@ public:
     }
 };
 
+class SimulationLogger {
+    vector<string> logs;
+
+public:
+    void addLog(const string &log) {
+        logs.push_back(log);
+    }
+
+    void displayLogs() {
+        for (auto &log : logs) {
+            cout << log << endl;
+        }
+    }
+};
+
+class CongestionMonitor {
+    unordered_map<int, int> roadCongestion;
+
+public:
+    void updateCongestion(int road, int vehicleCount) {
+        roadCongestion[road] = vehicleCount;
+    }
+
+    void displayCongestion() {
+        for (auto &entry : roadCongestion) {
+            cout << "Road " << entry.first << ": Vehicles = " << entry.second
+                 << endl;
+        }
+    }
+};
+
+class EmergencyVehicleRouting {
+public:
+    vector<int> calculateFastestRoute(Graph &graph, int start, int end) {
+        // Placeholder for A* algorithm
+        return graph.getShortestPath(start, end);
+    }
+};
+
+class TrafficSignal {
+    unordered_map<int, int> signalTimings;
+
+public:
+    void updateSignal(int intersection, int greenTime) {
+        signalTimings[intersection] = greenTime;
+    }
+
+    void displaySignals() {
+        for (auto &signal : signalTimings) {
+            cout << "Intersection " << signal.first
+                 << ": Green time = " << signal.second << "s\n";
+        }
+    }
+};
+
+
 int main() {
     UrbanTrafficControl system;
     system.initializeGraph("roadmap.txt");
