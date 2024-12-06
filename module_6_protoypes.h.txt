@@ -1,0 +1,87 @@
+#include <iostream>
+#include <queue.h>
+#include <cmath>
+#include <limits>
+
+using namespace std;
+
+// Function to initialize the hash table (road IDs to vehicle counts)
+void initializeHashTable(int* roadVehicleCount, int roadCount) {
+    for (int i = 0; i < roadCount; ++i) {
+        roadVehicleCount[i] = 0; // Initialize all road vehicle counts to 0
+    }
+}
+
+// Function to update vehicle counts for a road segment
+void updateVehicleCount(int* roadVehicleCount, int roadId, int count) {
+    roadVehicleCount[roadId] = count;
+}
+
+// Function to identify congested roads
+void identifyCongestedRoads(int* roadVehicleCount, int roadCount, int congestionThreshold, int* congestedRoads, int& congestedCount) {
+    congestedCount = 0;
+    for (int i = 0; i < roadCount; ++i) {
+        if (roadVehicleCount[i] > congestionThreshold) {
+            congestedRoads[congestedCount++] = i; // Store the road ID of congested roads
+        }
+    }
+}
+
+// Function to reroute traffic using BFS
+void rerouteTrafficBFS(Graph& graph, int startRoad, int* reroutedPath, int& pathLength) {
+    bool visited[graph.roadCount];
+    for (int i = 0; i < graph.roadCount; ++i) visited[i] = false;
+
+    queue<int> q;
+    q.push(startRoad);
+    visited[startRoad] = true;
+
+    int parent[graph.roadCount];
+    for (int i = 0; i < graph.roadCount; ++i) parent[i] = -1;
+
+    while (!q.empty()) {
+        int current = q.front();
+        q.pop();
+
+        Road currentRoad = graph.getRoad(current);
+        for (int neighbor : currentRoad.neighbors) { // Assuming Road has a list of connected roads
+            if (!visited[neighbor]) {
+                visited[neighbor] = true;
+                parent[neighbor] = current;
+                q.push(neighbor);
+
+                // Exit if we find a less congested road (condition depends on your use case)
+                if (graph.getRoad(neighbor).vehicleCount < graph.getRoad(current).vehicleCount) {
+                    int temp = neighbor;
+                    pathLength = 0;
+                    while (temp != -1) {
+                        reroutedPath[pathLength++] = temp;
+                        temp = parent[temp];
+                    }
+
+                    // Reverse the path
+                    for (int i = 0; i < pathLength / 2; ++i) {
+                        int tempSwap = reroutedPath[i];
+                        reroutedPath[i] = reroutedPath[pathLength - 1 - i];
+                        reroutedPath[pathLength - 1 - i] = tempSwap;
+                    }
+                    return;
+                }
+            }
+        }
+    }
+
+    pathLength = 0; // No alternative path found
+}
+
+// Function to display congestion levels (simulated visual representation)
+void displayCongestionLevels(int* roadVehicleCount, int roadCount) {
+    for (int i = 0; i < roadCount; ++i) {
+        cout << "Road " << i << ": ";
+        int congestionLevel = roadVehicleCount[i];
+        for (int j = 0; j < congestionLevel; ++j) {
+            cout << "#";
+        }
+        cout << " (" << congestionLevel << " vehicles)\n";
+    }
+}

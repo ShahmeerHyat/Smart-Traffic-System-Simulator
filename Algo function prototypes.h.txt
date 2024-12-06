@@ -1,0 +1,74 @@
+#include <cmath>
+#include <limits>
+#include "graph.h"
+
+
+// Heuristic function (e.g., Euclidean distance)
+double heuristic(GNode current, GNode goal) {
+    return sqrt(pow(current.x - goal.x, 2) + pow(current.y - goal.y, 2));
+}
+
+// Function to reconstruct the path
+void reconstructPath(int* cameFrom, int start, int goal, int* path, int& pathLength) {
+    int current = goal;
+    pathLength = 0;
+
+    while (current != start) {
+        path[pathLength++] = current;
+        current = cameFrom[current];
+    }
+    path[pathLength++] = start;
+
+    // Reverse the path
+    for (int i = 0; i < pathLength / 2; ++i) {
+        int temp = path[i];
+        path[i] = path[pathLength - 1 - i];
+        path[pathLength - 1 - i] = temp;
+    }
+}
+
+// A* Search Algorithm
+bool aStar(Graph& graph, int start, int goal, int* path, int& pathLength) {
+    PriorityQueue openSet; // Priority queue for nodes to explore
+    openSet.push({start, 0}); // Initialize with the starting node
+
+    double gScore[graph.nodeCount]; // Cost from start to each node
+    double fScore[graph.nodeCount]; // Estimated cost from start to goal
+    int cameFrom[graph.nodeCount];  // To reconstruct the path
+
+    for (int i = 0; i < graph.nodeCount; ++i) {
+        gScore[i] = numeric_limits<double>::infinity();
+        fScore[i] = numeric_limits<double>::infinity();
+        cameFrom[i] = -1;
+    }
+
+    gScore[start] = 0;
+    fScore[start] = heuristic(graph.getNode(start), graph.getNode(goal));
+
+    while (!openSet.empty()) {
+        int current = openSet.pop(); // Node with the lowest fScore
+
+        if (current == goal) {
+            reconstructPath(cameFrom, start, goal, path, pathLength);
+            return true;
+        }
+
+        Node currentNode = graph.getNode(current);
+        for (Edge edge : currentNode.edges) { // Assuming Node has a list of edges
+            int neighbor = edge.target;
+            double tentative_gScore = gScore[current] + edge.cost;
+
+            if (tentative_gScore < gScore[neighbor]) {
+                cameFrom[neighbor] = current;
+                gScore[neighbor] = tentative_gScore;
+                fScore[neighbor] = gScore[neighbor] + heuristic(graph.getNode(neighbor), graph.getNode(goal));
+
+                if (!openSet.contains(neighbor)) {
+                    openSet.push({neighbor, fScore[neighbor]});
+                }
+            }
+        }
+    }
+
+    return false; // No path found
+}
