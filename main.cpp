@@ -25,6 +25,122 @@ struct TrafficSignal {
     time_t lastChange;
 };
 
+
+class CongestionMonitor {
+private:
+    HashTable<string, int> roadCongestion; // key: "start-end", value: vehicle count
+    const int CONGESTION_THRESHOLD = 3;
+    
+    string makeRoadKey(char start, char end) {
+        string key;
+        key += start;
+        key += "-";
+        key += end;
+        return key;
+    }
+
+public:
+    void updateCongestion(const LinkedList<char>& path, int currentPosition) {
+        Node<char>* current = path.head;
+        for(int i = 0; i < currentPosition && current && current->next; i++) {
+            current = current->next;
+        }
+        
+        if(current && current->next) {
+            string roadKey = makeRoadKey(current->data, current->next->data);
+            int count = 0;
+            roadCongestion.get(roadKey, count);
+            roadCongestion.insert(roadKey, count + 1);
+        }
+    }
+
+    void decreaseCongestion(const LinkedList<char>& path, int position) {
+        Node<char>* current = path.head;
+        for(int i = 0; i < position && current && current->next; i++) {
+            current = current->next;
+        }
+        
+        if(current && current->next) {
+            string roadKey = makeRoadKey(current->data, current->next->data);
+            int count = 0;
+            roadCongestion.get(roadKey, count);
+            if(count > 0) {
+                roadCongestion.insert(roadKey, count - 1);
+            }
+        }
+    }
+
+    bool isRoadCongested(char start, char end) {
+        string roadKey = makeRoadKey(start, end);
+        int count = 0;
+        roadCongestion.get(roadKey, count);
+        return count >= CONGESTION_THRESHOLD;
+    }
+
+    void displayCongestionLevels() {
+        cout << "\nRoad Congestion Levels:\n";
+        cout << "=====================\n";
+        
+        for(char start = 'A'; start <= 'Z'; start++) {
+            for(char end = 'A'; end <= 'Z'; end++) {
+                string roadKey = makeRoadKey(start, end);
+                int count = 0;
+                if(roadCongestion.get(roadKey, count) && count > 0) {
+                    cout << start << " -> " << end << ": ";
+                    if(count >= CONGESTION_THRESHOLD) {
+                        cout << RED << count << " vehicles (CONGESTED)" << RESET;
+                    } else {
+                        cout << GREEN << count << " vehicles" << RESET;
+                    }
+                    cout << endl;
+                }
+            }
+        }
+    }
+
+    // BFS to find alternative routes avoiding congested roads
+    LinkedList<char> findAlternativeRoute(DirectedWeightedGraph* graph, char start, char end) {
+        const int MAX_VERTICES = 26;
+        bool visited[MAX_VERTICES] = {false};
+        char parent[MAX_VERTICES];
+        CustomQueue<char> queue;
+        
+        queue.enqueue(start);
+        visited[start - 'A'] = true;
+        
+        while(!queue.isEmpty()) {
+            char current = queue.dequeue();
+            
+            if(current == end) {
+                LinkedList<char> path;
+                char temp = end;
+                while(temp != start) {
+                    path.insertAtHead(temp);
+                    temp = parent[temp - 'A'];
+                }
+                path.insertAtHead(start);
+                return path;
+            }
+            
+            GNode* edges = graph->getEdges(current - 'A');
+            while(edges) {
+                char nextVertex = edges->vertex + 'A';
+                if(!visited[nextVertex - 'A'] && !isRoadCongested(current, nextVertex)) {
+                    visited[nextVertex - 'A'] = true;
+                    parent[nextVertex - 'A'] = current;
+                    queue.enqueue(nextVertex);
+                }
+                edges = edges->next;
+            }
+        }
+        
+        LinkedList<char> emptyPath;
+        return emptyPath;
+    }
+};
+
+
+
 struct Vehicle {
     string id;
     char start;
@@ -101,6 +217,7 @@ private:
     HashTable<string, Vehicle> vehicles;
     HashTable<char, int> congestionLevels;
     LinkedList<string> vehicleIds;
+    CongestionMonitor congestionMonitor; 
 
     int getIndex(char id) { return id - 'A'; }
     char getId(int index) { return static_cast<char>('A' + index); }
@@ -154,37 +271,63 @@ public:
         }
     }
 
-   void updateVehiclePosition(const string& id) {
-    Vehicle v;
-    if(vehicles.get(id, v)) {
-        if(!v.inTransit) return;
+    void updateVehiclePosition(const string& id) {
+        Vehicle v;
+        if(vehicles.get(id, v)) {
+            if(!v.inTransit) return;
 
-        // Get current signal status
-        TrafficSignal* signal;
-        char currentLocation = getCurrentLocation(v);
-        if(signals->getSignalStatus(currentLocation, signal)) {
-            if(!signal->isGreen) {
-                return; // Don't move if signal is red
+            // Get current signal status
+            TrafficSignal* signal;
+            char currentLocation = getCurrentLocation(v);
+            
+            // Check for congestion and reroute if needed
+            Node<char>* pathNode = v.path.head;
+            for(int i = 0; i < v.currentPosition && pathNode && pathNode->next; i++) {
+                pathNode = pathNode->next;
             }
-        }
-
-        v.timeInCurrentSegment++;
-        Node<int>* timingNode = v.timings.head;
-        for(int i = 0; i < v.currentPosition; i++) {
-            if(timingNode) timingNode = timingNode->next;
-        }
-
-        if(timingNode && v.timeInCurrentSegment >= timingNode->data) {
-            v.timeInCurrentSegment = 0;
-            v.currentPosition++;
-            updateCongestionLevels(v);
-            if(v.currentPosition >= v.path.countNodes() - 1) {
-                v.inTransit = false;
+            
+            if(pathNode && pathNode->next) {
+                if(congestionMonitor.isRoadCongested(pathNode->data, pathNode->next->data)) {
+                    LinkedList<char> newPath = congestionMonitor.findAlternativeRoute(
+                        graph, 
+                        currentLocation, 
+                        v.end
+                    );
+                    if(newPath.head != nullptr) {
+                        congestionMonitor.decreaseCongestion(v.path, v.currentPosition);
+                        v.path = newPath;
+                        v.currentPosition = 0;
+                        calculateRoute(v);
+                    }
+                }
             }
+
+            if(signals->getSignalStatus(currentLocation, signal)) {
+                if(!signal->isGreen) {
+                    return;
+                }
+            }
+
+            v.timeInCurrentSegment++;
+            Node<int>* timingNode = v.timings.head;
+            for(int i = 0; i < v.currentPosition; i++) {
+                if(timingNode) timingNode = timingNode->next;
+            }
+
+            if(timingNode && v.timeInCurrentSegment >= timingNode->data) {
+                congestionMonitor.decreaseCongestion(v.path, v.currentPosition);
+                v.timeInCurrentSegment = 0;
+                v.currentPosition++;
+                if(v.currentPosition < v.path.countNodes() - 1) {
+                    congestionMonitor.updateCongestion(v.path, v.currentPosition);
+                }
+                if(v.currentPosition >= v.path.countNodes() - 1) {
+                    v.inTransit = false;
+                }
+            }
+            vehicles.insert(id, v);
         }
-        vehicles.insert(id, v);
     }
-}
 
     void updateCongestionLevels(const Vehicle& v) {
         char currentLocation = getCurrentLocation(v);
@@ -210,7 +353,10 @@ public:
             displayVehicleStatus(current->data);
             current = current->next;
         }
+        cout << "\n";
+        congestionMonitor.displayCongestionLevels();
     }
+
 
     void displayVehicleStatus(const string& id) {
         Vehicle v;
