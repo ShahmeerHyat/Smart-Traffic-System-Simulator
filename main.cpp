@@ -43,6 +43,8 @@ private:
     struct RoadStatus {
         string status;
         time_t blockStartTime;
+        RoadStatus() : status("Clear"), blockStartTime(0) {}
+        RoadStatus(string s, time_t t) : status(s), blockStartTime(t) {}
         bool isBlocked() { 
             if(status == "Clear") return false;
             if(status == "Blocked") return true;
@@ -76,6 +78,11 @@ public:
             }
         }
     }
+      void addClosure(const string& roadKey, const string& status) {
+        RoadStatus rs{status, time(nullptr)};
+        closures.insert(roadKey, rs);
+    }
+    
 
     bool isRoadBlocked(char start, char end) {
         RoadStatus status;
@@ -560,6 +567,31 @@ LinkedList<CollisionEvent> collisions;
             current1 = current1->next;
         }
     }
+    void handleCollision(const Vehicle& v1, const Vehicle& v2, char location) {
+        Node<char>* path1 = v1.path.head;
+        Node<char>* path2 = v2.path.head;
+        
+        for(int i = 0; i < v1.currentPosition && path1; i++) path1 = path1->next;
+        for(int i = 0; i < v2.currentPosition && path2; i++) path2 = path2->next;
+        
+        if(path1 && path1->next && path2 && path2->next) {
+            string roadKey1 = string(1, location) + "-" + string(1, path1->next->data);
+            string roadKey2 = string(1, location) + "-" + string(1, path2->next->data);
+            
+            closureManager->addClosure(roadKey1, "Blocked");
+            closureManager->addClosure(roadKey2, "Blocked");
+            
+            Vehicle v1Copy = v1;
+            Vehicle v2Copy = v2;
+            v1Copy.inTransit = false;
+            v2Copy.inTransit = false;
+            vehicles.insert(v1.id, v1Copy);
+            vehicles.insert(v2.id, v2Copy);
+            
+            CollisionEvent collision{v1.id, v2.id, location, time(nullptr)};
+            collisions.insertAtEnd(collision);
+        }
+    }
 
     void displayCollisions() {
         if (collisions.head == nullptr) {
@@ -579,30 +611,32 @@ LinkedList<CollisionEvent> collisions;
         }
     }
 
-     void checkAndUpdateRoute(const string& id) {
-        Vehicle v;
-        if(vehicles.get(id, v)) {
-            int newPath[100];
-            int newPathLength = graph->dijkstra(
-                getCurrentLocation(v) - 'A',
-                v.end - 'A',
-                newPath
-            );
-            
-            // Compare new path with current remaining path
-            bool shouldReroute = false;
-            Node<char>* currentPath = v.path.head;
-            for(int i = 0; i < v.currentPosition && currentPath; i++) {
-                currentPath = currentPath->next;
-            }
-            
-            int currentRemainingLength = 0;
-            while(currentPath) {
-                currentRemainingLength++;
-                currentPath = currentPath->next;
-            }
-            
-            if(newPathLength < currentRemainingLength) {
+    void checkAndUpdateRoute(const string& id) {
+    Vehicle v;
+    if(vehicles.get(id, v) && v.inTransit) {
+        // Get current location and check surrounding roads
+        char currentLoc = getCurrentLocation(v);
+        Node<char>* pathNode = v.path.head;
+        
+        // Move to current position
+        for(int i = 0; i < v.currentPosition && pathNode && pathNode->next; i++) {
+            pathNode = pathNode->next;
+        }
+        
+        // Check if next road segment is blocked or congested
+        if(pathNode && pathNode->next) {
+            if(closureManager->isRoadBlocked(pathNode->data, pathNode->next->data) || 
+               congestionMonitor.isRoadCongested(pathNode->data, pathNode->next->data)) {
+                
+                // Calculate new path from current location
+                int newPath[100];
+                int newPathLength = graph->dijkstra(
+                    currentLoc - 'A',
+                    v.end - 'A',
+                    newPath
+                );
+                
+                // Update vehicle's path
                 v.path.clear();
                 v.timings.clear();
                 for(int i = 0; i < newPathLength; i++) {
@@ -614,6 +648,7 @@ LinkedList<CollisionEvent> collisions;
             }
         }
     }
+}
 
     string makeRoadKey(char start, char end) {
     return string(1, start) + "-" + string(1, end);
