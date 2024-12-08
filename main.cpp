@@ -11,6 +11,7 @@
 #include "heap.h"
 #include "doublylinkedlist.h"
 
+
 using namespace std;
 
 const string RESET = "\033[0m";
@@ -24,6 +25,17 @@ struct TrafficSignal {
     int greenDuration;
     time_t lastChange;
 };
+struct EmergencyVehicle {
+    string id;
+    char start;
+    char end;
+    string priority;
+    LinkedList<char> path;
+    int currentPosition;
+    bool inTransit;
+};
+
+
 
 
 class CongestionMonitor {
@@ -209,7 +221,155 @@ void displaySignalStatus() {
    }
 }
 };
+class EmergencyVehicleManager {
+private:
+    HashTable<string, EmergencyVehicle> vehicles;
+    LinkedList<string> vehicleIds;
+    DirectedWeightedGraph* graph;
+    HashTable<string, time_t> lastMoveTime;
+    HashTable<string, int> currentSegmentTime;
 
+    int getIndex(char id) { return id - 'A'; }
+    char getId(int index) { return static_cast<char>('A' + index); }
+
+public:
+    EmergencyVehicleManager(DirectedWeightedGraph* g) : graph(g) {}
+
+    void addVehicle(const string& id, char start, char end, const string& priority) {
+        EmergencyVehicle v{id, start, end, priority, LinkedList<char>(), 0, true};
+        calculateRoute(v);
+        vehicles.insert(id, v);
+        vehicleIds.insertAtEnd(id);
+    }
+
+    void calculateRoute(EmergencyVehicle& vehicle) {
+        int path[100];
+        int pathLength = graph->dijkstra(getIndex(vehicle.start), getIndex(vehicle.end), path);
+        
+        for(int i = 0; i < pathLength; i++) {
+            vehicle.path.insertAtEnd(getId(path[i]));
+        }
+    }
+
+       void updatePositions() {
+        Node<string>* current = vehicleIds.head;
+        while(current != nullptr) {
+            EmergencyVehicle v;
+            if(vehicles.get(current->data, v) && v.inTransit) {
+                time_t currentTime = time(nullptr);
+                
+                // Get current segment weight
+                Node<char>* pathNode = v.path.head;
+                for(int i = 0; i < v.currentPosition && pathNode && pathNode->next; i++) {
+                    pathNode = pathNode->next;
+                }
+                
+                if(pathNode && pathNode->next) {
+                    int currentWeight = 0;
+                    GNode* edges = graph->getEdges(pathNode->data - 'A');
+                    while(edges) {
+                        if(edges->vertex == (pathNode->next->data - 'A')) {
+                            currentWeight = edges->weight;
+                            break;
+                        }
+                        edges = edges->next;
+                    }
+                    
+                    // Reduce time for emergency vehicles (move faster than regular vehicles)
+                    currentWeight = max(1, currentWeight / 2);
+                    
+                    int elapsedTime;
+                    if(!currentSegmentTime.get(v.id, elapsedTime)) {
+                        elapsedTime = 0;
+                        currentSegmentTime.insert(v.id, 0);
+                    }
+                    
+                    if(difftime(currentTime, lastMoveTime[v.id]) >= 1) {
+                        elapsedTime++;
+                        currentSegmentTime.insert(v.id, elapsedTime);
+                        lastMoveTime.insert(v.id, currentTime);
+                        
+                        if(elapsedTime >= currentWeight) {
+                            v.currentPosition++;
+                            currentSegmentTime.insert(v.id, 0);
+                            
+                            if(v.currentPosition >= v.path.countNodes() - 1) {
+                                v.inTransit = false;
+                            }
+                        }
+                        vehicles.insert(current->data, v);
+                    }
+                }
+            }
+            current = current->next;
+        }
+    }
+
+
+    void displayVehicles() {
+        Node<string>* current = vehicleIds.head;
+        while(current != nullptr) {
+            EmergencyVehicle v;
+            if(vehicles.get(current->data, v)) {
+                cout << "\n" << RED << v.id << " (Priority: " << v.priority << "):" << RESET;
+                if(!v.inTransit) {
+                    cout << " ARRIVED at " << v.end;
+                    current = current->next;
+                    continue;
+                }
+
+                Node<char>* pathNode = v.path.head;
+                for(int i = 0; i <= v.currentPosition && pathNode; i++) {
+                    if(i < v.currentPosition) {
+                        cout << pathNode->data << " -> ";
+                        pathNode = pathNode->next;
+                    }
+                }
+                if(pathNode && pathNode->next) {
+                    cout << RED << pathNode->data << " -> " << pathNode->next->data << RESET;
+                }
+            }
+            current = current->next;
+        }
+        cout << endl;
+    }
+
+    char getCurrentLocation(const EmergencyVehicle& v) {
+        Node<char>* current = v.path.head;
+        for(int i = 0; i < v.currentPosition && current; i++) {
+            current = current->next;
+        }
+        return current ? current->data : v.start;
+    }
+
+    void forceSignalOverride(SignalManagementSystem* signals) {
+    Node<string>* current = vehicleIds.head;
+    while(current != nullptr) {
+        EmergencyVehicle v;
+        if(vehicles.get(current->data, v) && v.inTransit) {
+            char location = getCurrentLocation(v);
+            signals->emergencyOverride(location);
+            
+            // For high priority vehicles, turn signal behind them red
+            if(v.priority == "High") {
+                Node<char>* pathNode = v.path.head;
+                for(int i = 0; i < v.currentPosition - 1 && pathNode; i++) {
+                    pathNode = pathNode->next;
+                }
+                
+                if(pathNode && v.currentPosition > 0) {
+                    TrafficSignal* signal;
+                    if(signals->getSignalStatus(pathNode->data, signal)) {
+                        signal->isGreen = false;
+                        signal->lastChange = time(nullptr);
+                    }
+                }
+            }
+        }
+        current = current->next;
+    }
+}
+};
 class VehicleRoutingSystem {
 private:
     DirectedWeightedGraph* graph;
@@ -395,6 +555,7 @@ private:
     int numIntersections;
     VehicleRoutingSystem* router;
     SignalManagementSystem* signalManager;
+    EmergencyVehicleManager* emergencyManager;
 
     int getIndex(char id) { return id - 'A'; }
     char getId(int index) { return static_cast<char>('A' + index); }
@@ -475,6 +636,29 @@ private:
         file.close();
     }
 
+    void loadEmergencyVehicles(const string& filename) {
+    ifstream file(filename);
+    if (!file.is_open()) {
+        cerr << "Failed to open file: " << filename << endl;
+        return;
+    }
+    
+    string line;
+    while (getline(file, line)) {
+        if (line.empty()) continue;
+        
+        stringstream ss(line);
+        string id, start, end, priority;
+        
+        if (getline(ss, id, ',') && getline(ss, start, ',') && 
+            getline(ss, end, ',') && getline(ss, priority, ',')) {
+            emergencyManager->addVehicle(id, start[0], end[0], priority);
+        }
+    }
+    file.close();
+}
+
+
     void loadTrafficSignals(const string& filename) {
         ifstream file(filename);
         if (!file.is_open()) {
@@ -501,12 +685,13 @@ private:
     }
 
 public:
-    CityTrafficSystem() : graph(nullptr), numIntersections(0), router(nullptr), signalManager(nullptr) {}
+    CityTrafficSystem() : graph(nullptr), numIntersections(0), router(nullptr), signalManager(nullptr), emergencyManager(nullptr) {}
     
     ~CityTrafficSystem() {
         delete graph;
         delete router;
         delete signalManager;
+        delete emergencyManager;
     }
 
     
@@ -517,10 +702,11 @@ public:
     loadRoadNetwork(filename);
     signalManager = new SignalManagementSystem();
     loadTrafficSignals("traffic_signals.csv");
-    router = new VehicleRoutingSystem(graph, signalManager);  // Move this after signalManager initialization
+    router = new VehicleRoutingSystem(graph, signalManager);
+    emergencyManager = new EmergencyVehicleManager(graph); // Add this line
     loadVehicles("vehicles.csv");
-
-    }
+    loadEmergencyVehicles("emergency_vehicles.csv");
+}
 
     void displayNetwork() {
         if (!graph) {
@@ -546,31 +732,38 @@ public:
     }
 
     void startSimulation() {
-       
-        cout << "\nPress any intersection letter (A-Z) for emergency override" << endl;
-        cout << "Press ESC to exit" << endl;
+    cout << "\nPress any intersection letter (A-Z) for emergency override" << endl;
+    cout << "Press ESC to exit" << endl;
 
-        while(true) {
-            if(_kbhit()) {
-                char ch = _getch();
-                if(ch == 27) break;  // ESC key
-                ch = toupper(ch);
-                if(ch >= 'A' && ch <= 'Z') {
-                    signalManager->emergencyOverride(ch);
-                }
+    while(true) {
+        if(_kbhit()) {
+            char ch = _getch();
+            if(ch == 27) break;  // ESC key
+            ch = toupper(ch);
+            if(ch >= 'A' && ch <= 'Z') {
+                signalManager->emergencyOverride(ch);
             }
-
-            system("cls");
-            displayNetwork();
-            signalManager->processSignals();
-            signalManager->displaySignalStatus();
-            cout << "\nVehicle Positions:\n";
-            cout << "=================\n";
-            router->displayVehicles();
-            router->updateAllVehicles();
-            this_thread::sleep_for(chrono::seconds(1));
         }
+
+        system("cls");
+        displayNetwork();
+        signalManager->processSignals();
+        emergencyManager->forceSignalOverride(signalManager);  // Override signals for emergency vehicles
+        signalManager->displaySignalStatus();
+        
+        cout << "\nEmergency Vehicles:\n";
+        cout << "==================\n";
+        emergencyManager->displayVehicles();
+        
+        cout << "\nRegular Vehicles:\n";
+        cout << "================\n";
+        router->displayVehicles();
+        
+        router->updateAllVehicles();
+        emergencyManager->updatePositions();  // Update emergency vehicle positions
+        this_thread::sleep_for(chrono::seconds(1));
     }
+}
 };
 
 int main() {
