@@ -458,12 +458,21 @@ private:
     CongestionMonitor congestionMonitor; 
     RoadClosureManager* closureManager;
 
+    struct CollisionEvent {
+        string vehicle1;
+        string vehicle2;
+        char location;
+        time_t timestamp;
+    };
+    
+
     int getIndex(char id) { return id - 'A'; }
     char getId(int index) { return static_cast<char>('A' + index); }
 
 public:
 
 LinkedList<string> vehicleIds;
+LinkedList<CollisionEvent> collisions;
    VehicleRoutingSystem(DirectedWeightedGraph* g, SignalManagementSystem* s) 
         : graph(g), signals(s) {}
 
@@ -501,6 +510,72 @@ LinkedList<string> vehicleIds;
                     edges = edges->next;
                 }
             }
+        }
+    }
+    bool checkCollision(const Vehicle& v1, const Vehicle& v2) {
+        if (!v1.inTransit || !v2.inTransit) return false;
+        
+        char loc1 = getCurrentLocation(v1);
+        char loc2 = getCurrentLocation(v2);
+        
+        // Check if vehicles are at same intersection
+        if (loc1 == loc2) {
+            Node<char>* path1 = v1.path.head;
+            Node<char>* path2 = v2.path.head;
+            
+            // Move to current positions
+            for (int i = 0; i < v1.currentPosition && path1; i++) path1 = path1->next;
+            for (int i = 0; i < v2.currentPosition && path2; i++) path2 = path2->next;
+            
+            // Check if vehicles are moving to same next intersection
+            if (path1 && path1->next && path2 && path2->next) {
+                if (path1->next->data == path2->next->data) {
+                    CollisionEvent collision{v1.id, v2.id, loc1, time(nullptr)};
+                    collisions.insertAtEnd(collision);
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    void handleCollisions() {
+        // Check all vehicle pairs for collisions
+        Node<string>* current1 = vehicleIds.head;
+        while (current1 != nullptr) {
+            Node<string>* current2 = current1->next;
+            while (current2 != nullptr) {
+                Vehicle v1, v2;
+                if (vehicles.get(current1->data, v1) && vehicles.get(current2->data, v2)) {
+                    if (checkCollision(v1, v2)) {
+                        // Stop both vehicles
+                        v1.inTransit = false;
+                        v2.inTransit = false;
+                        vehicles.insert(v1.id, v1);
+                        vehicles.insert(v2.id, v2);
+                    }
+                }
+                current2 = current2->next;
+            }
+            current1 = current1->next;
+        }
+    }
+
+    void displayCollisions() {
+        if (collisions.head == nullptr) {
+            cout << "\nNo collisions reported.\n";
+            return;
+        }
+        
+        cout << "\nCollision Reports:\n";
+        cout << "=================\n";
+        Node<CollisionEvent>* current = collisions.head;
+        while (current != nullptr) {
+            cout << RED << "Collision between " << current->data.vehicle1 
+                 << " and " << current->data.vehicle2
+                 << " at intersection " << current->data.location 
+                 << " (Time: " << ctime(&current->data.timestamp) << ")" << RESET;
+            current = current->next;
         }
     }
 
@@ -591,6 +666,7 @@ void displayVehiclesPerRoad() {
     
 
     void updateAllVehicles() {
+         handleCollisions(); 
         Node<string>* current = vehicleIds.head;
         while(current != nullptr) {
             updateVehiclePosition(current->data);
@@ -950,8 +1026,10 @@ void displayMenu() {
     cout << "4. Display Road Blockage Status\n";
     cout << "5. Emergency Vehicle Routing\n";
     cout << "6. Vehicle Routing Status\n";
-    cout << "7. Exit\n\n";
+    cout << "7. Collision Reports\n";      // Add this line
+    cout << "8. Exit\n\n";                 // Changed from 7 to 8
     cout << "Enter your choice: ";
+
 }
 
 int main() {
@@ -975,7 +1053,7 @@ int main() {
         displayMenu();
         char choice = _getch();
         
-        if(choice == '7') {
+        if(choice == '8') {
             running = false;
             break;
         }
@@ -1023,6 +1101,11 @@ int main() {
                         cout << "======================================\n";
                         system.router->displayVehicles();
                         break;
+                    case '7':
+                        cout << "Collision Reports (Press ESC to return)\n";
+                        cout << "================================\n";
+                        system.router->displayCollisions();
+    break;
                 }
                 lastUpdate = time(nullptr);
             }
