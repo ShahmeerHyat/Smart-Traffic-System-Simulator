@@ -36,6 +36,83 @@ struct EmergencyVehicle {
 };
 
 
+class RoadClosureManager {
+private:
+    struct RoadStatus {
+        string status;
+        time_t blockStartTime;
+        bool isBlocked() { 
+            if(status == "Clear") return false;
+            if(status == "Blocked") return true;
+            if(status == "Under Repair") {
+                return difftime(time(nullptr), blockStartTime) < 10;
+            }
+            return false;
+        }
+    };
+    
+    HashTable<string, RoadStatus> closures;
+    DirectedWeightedGraph* graph;
+    
+    string makeRoadKey(char start, char end) {
+        return string(1, start) + "-" + string(1, end);
+    }
+
+public:
+    RoadClosureManager(DirectedWeightedGraph* g) : graph(g) {}
+    
+    void loadClosures(const string& filename) {
+        ifstream file(filename);
+        string line;
+        while(getline(file, line)) {
+            stringstream ss(line);
+            string from, to, status;
+            if(getline(ss, from, ',') && getline(ss, to, ',') && getline(ss, status, ',')) {
+                if(from.empty() || to.empty()) continue;
+                RoadStatus rs{status, time(nullptr)};
+                closures.insert(makeRoadKey(from[0], to[0]), rs);
+            }
+        }
+    }
+
+    bool isRoadBlocked(char start, char end) {
+        RoadStatus status;
+        if(closures.get(makeRoadKey(start, end), status)) {
+            return status.isBlocked();
+        }
+        return false;
+    }
+
+     void displayClosures() {
+       cout << "\nRoad Closures Status:\n";
+       cout << "===================\n";
+       
+       for(char start = 'A'; start <= 'Z'; start++) {
+           for(char end = 'A'; end <= 'Z'; end++) {
+               RoadStatus status;
+               string key = makeRoadKey(start, end);
+               if(closures.get(key, status)) {
+                   cout << start << " -> " << end << ": ";
+                   if(status.status == "Under Repair") {
+                       if(status.isBlocked()) {
+                           cout << RED << "Under Repair (" << 
+                               10 - (int)difftime(time(nullptr), status.blockStartTime) << 
+                               "s remaining)" << RESET;
+                       } else {
+                           cout << GREEN << "REPAIRED" << RESET;
+                       }
+                   } else if(status.status == "Blocked") {
+                       cout << RED << "BLOCKED" << RESET;
+                   } else {
+                       cout << GREEN << "CLEAR" << RESET;
+                   }
+                   cout << endl;
+               }
+           }
+       }
+   }
+};
+
 
 
 class CongestionMonitor {
@@ -376,13 +453,15 @@ private:
     SignalManagementSystem* signals;
     HashTable<string, Vehicle> vehicles;
     HashTable<char, int> congestionLevels;
-    LinkedList<string> vehicleIds;
     CongestionMonitor congestionMonitor; 
+    RoadClosureManager* closureManager;
 
     int getIndex(char id) { return id - 'A'; }
     char getId(int index) { return static_cast<char>('A' + index); }
 
 public:
+
+LinkedList<string> vehicleIds;
    VehicleRoutingSystem(DirectedWeightedGraph* g, SignalManagementSystem* s) 
         : graph(g), signals(s) {}
 
@@ -422,6 +501,43 @@ public:
             }
         }
     }
+
+     void checkAndUpdateRoute(const string& id) {
+        Vehicle v;
+        if(vehicles.get(id, v)) {
+            int newPath[100];
+            int newPathLength = graph->dijkstra(
+                getCurrentLocation(v) - 'A',
+                v.end - 'A',
+                newPath
+            );
+            
+            // Compare new path with current remaining path
+            bool shouldReroute = false;
+            Node<char>* currentPath = v.path.head;
+            for(int i = 0; i < v.currentPosition && currentPath; i++) {
+                currentPath = currentPath->next;
+            }
+            
+            int currentRemainingLength = 0;
+            while(currentPath) {
+                currentRemainingLength++;
+                currentPath = currentPath->next;
+            }
+            
+            if(newPathLength < currentRemainingLength) {
+                v.path.clear();
+                v.timings.clear();
+                for(int i = 0; i < newPathLength; i++) {
+                    v.path.insertAtEnd(getId(newPath[i]));
+                }
+                v.currentPosition = 0;
+                calculateRoute(v);
+                vehicles.insert(id, v);
+            }
+        }
+    }
+    
 
     void updateAllVehicles() {
         Node<string>* current = vehicleIds.head;
@@ -556,6 +672,7 @@ private:
     VehicleRoutingSystem* router;
     SignalManagementSystem* signalManager;
     EmergencyVehicleManager* emergencyManager;
+    RoadClosureManager* closureManager;
 
     int getIndex(char id) { return id - 'A'; }
     char getId(int index) { return static_cast<char>('A' + index); }
@@ -706,6 +823,8 @@ public:
     emergencyManager = new EmergencyVehicleManager(graph); // Add this line
     loadVehicles("vehicles.csv");
     loadEmergencyVehicles("emergency_vehicles.csv");
+    closureManager = new RoadClosureManager(graph);
+    closureManager->loadClosures("road_closures.csv");
 }
 
     void displayNetwork() {
@@ -731,26 +850,23 @@ public:
         }
     }
 
-    void startSimulation() {
-    cout << "\nPress any intersection letter (A-Z) for emergency override" << endl;
-    cout << "Press ESC to exit" << endl;
-
+   void startSimulation() {
     while(true) {
-        if(_kbhit()) {
-            char ch = _getch();
-            if(ch == 27) break;  // ESC key
-            ch = toupper(ch);
-            if(ch >= 'A' && ch <= 'Z') {
-                signalManager->emergencyOverride(ch);
-            }
-        }
-
         system("cls");
         displayNetwork();
         signalManager->processSignals();
-        emergencyManager->forceSignalOverride(signalManager);  // Override signals for emergency vehicles
+        emergencyManager->forceSignalOverride(signalManager);
         signalManager->displaySignalStatus();
-        
+        closureManager->displayClosures();
+
+        // Check and update routes for all vehicles
+        Node<string>* current = router->vehicleIds.head;
+        while(current != nullptr) {
+            router->checkAndUpdateRoute(current->data);
+            current = current->next;
+        }
+
+        // Rest of simulation loop
         cout << "\nEmergency Vehicles:\n";
         cout << "==================\n";
         emergencyManager->displayVehicles();
@@ -760,7 +876,7 @@ public:
         router->displayVehicles();
         
         router->updateAllVehicles();
-        emergencyManager->updatePositions();  // Update emergency vehicle positions
+        emergencyManager->updatePositions();
         this_thread::sleep_for(chrono::seconds(1));
     }
 }
