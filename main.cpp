@@ -10,6 +10,8 @@
 #include "hashtable.h"
 #include "heap.h"
 #include "doublylinkedlist.h"
+#include <cstdlib>
+#include <atomic>
 
 
 using namespace std;
@@ -666,7 +668,7 @@ LinkedList<string> vehicleIds;
 };
 
 class CityTrafficSystem {
-private:
+public:
     DirectedWeightedGraph* graph;
     int numIntersections;
     VehicleRoutingSystem* router;
@@ -882,9 +884,122 @@ public:
 }
 };
 
+void clearScreen() {
+    #ifdef _WIN32
+        std::system("cls");
+    #else
+        std::system("clear");
+    #endif
+}
+
+void displayMenu() {
+    cout << "\nSmart Traffic Management System\n";
+    cout << "==============================\n";
+    cout << "1. Display Graph Connectivity\n";
+    cout << "2. Traffic Signal Status\n";
+    cout << "3. Display Congestion Status\n";
+    cout << "4. Display Road Blockage Status\n";
+    cout << "5. Emergency Vehicle Routing\n";
+    cout << "6. Vehicle Routing Status\n";
+    cout << "7. Exit\n\n";
+    cout << "Enter your choice: ";
+}
+
 int main() {
     CityTrafficSystem system;
     system.initializeFromFile("road_network.csv");
-    system.startSimulation();
+    
+    std::atomic<bool> running{true};
+    
+    std::thread updateThread([&]() {
+        while(running) {
+            system.signalManager->processSignals();
+            system.emergencyManager->forceSignalOverride(system.signalManager);
+            system.router->updateAllVehicles();
+            system.emergencyManager->updatePositions();
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
+    });
+    
+    while(running) {
+        clearScreen();
+        displayMenu();
+        char choice = _getch();
+        
+        if(choice == '7') {
+            running = false;
+            break;
+        }
+        
+        clearScreen();
+        bool viewingStatus = true;
+        time_t lastUpdate = time(nullptr);
+        
+        while(viewingStatus && running) {
+            if(difftime(time(nullptr), lastUpdate) >= 1) {
+                clearScreen();
+                switch(choice) {
+                    case '1':
+                        cout << "Graph Connectivity (Press ESC to return)\n";
+                        cout << "=======================================\n";
+                        system.displayNetwork();
+                        break;
+                        
+                    case '2':
+                        cout << "Traffic Signal Status (Press 'O' to override, ESC to return)\n";
+                        cout << "====================================================\n";
+                        system.signalManager->displaySignalStatus();
+                        break;
+                        
+                    case '3':
+                        cout << "Congestion Status (Press ESC to return)\n";
+                        cout << "====================================\n";
+                        system.router->displayVehicles();
+                        break;
+                        
+                    case '4':
+                        cout << "Road Blockage Status (Press ESC to return)\n";
+                        cout << "======================================\n";
+                        system.closureManager->displayClosures();
+                        break;
+                        
+                    case '5':
+                        cout << "Emergency Vehicle Status (Press ESC to return)\n";
+                        cout << "========================================\n";
+                        system.emergencyManager->displayVehicles();
+                        break;
+                        
+                    case '6':
+                        cout << "Vehicle Routing Status (Press ESC to return)\n";
+                        cout << "======================================\n";
+                        system.router->displayVehicles();
+                        break;
+                }
+                lastUpdate = time(nullptr);
+            }
+            
+            if(_kbhit()) {
+                char key = _getch();
+                if(key == 27) { // ESC
+                    viewingStatus = false;
+                }
+                else if(choice == '2' && (key == 'o' || key == 'O')) {
+                    cout << "\nEnter intersection to override (A-Z): ";
+                    char intersection = _getch();
+                    cout << intersection << endl;
+                    if(intersection >= 'A' && intersection <= 'Z') {
+                        system.signalManager->emergencyOverride(intersection);
+                        cout << "Signal overridden at intersection " << intersection << endl;
+                        std::this_thread::sleep_for(std::chrono::seconds(1));
+                    }
+                }
+            }
+            
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+    }
+    
+    updateThread.join();
+    cout << "\nExiting system...\n";
     return 0;
 }
