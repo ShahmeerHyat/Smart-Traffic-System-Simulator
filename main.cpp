@@ -539,6 +539,55 @@ LinkedList<string> vehicleIds;
             }
         }
     }
+
+    string makeRoadKey(char start, char end) {
+    return string(1, start) + "-" + string(1, end);
+}
+
+void displayVehiclesPerRoad() {
+    HashTable<string, int> roadCount;
+    
+    // Count vehicles on each road segment
+    Node<string>* current = vehicleIds.head;
+    while(current != nullptr) {
+        Vehicle v;
+        if(vehicles.get(current->data, v) && v.inTransit) {
+            Node<char>* pathNode = v.path.head;
+            // Move to current position in path
+            for(int i = 0; i < v.currentPosition && pathNode && pathNode->next; i++) {
+                pathNode = pathNode->next;
+            }
+            
+            // If vehicle is on a road segment
+            if(pathNode && pathNode->next) {
+                string roadKey = makeRoadKey(pathNode->data, pathNode->next->data);
+                int count = 0;
+                roadCount.get(roadKey, count);
+                roadCount.insert(roadKey, count + 1);
+            }
+        }
+        current = current->next;
+    }
+    
+    // Display counts
+    cout << "\nCurrent Vehicle Distribution on Roads:\n";
+    cout << "===================================\n";
+    for(char start = 'A'; start <= 'Z'; start++) {
+        for(char end = 'A'; end <= 'Z'; end++) {
+            string roadKey = makeRoadKey(start, end);
+            int count = 0;
+            if(roadCount.get(roadKey, count) && count > 0) {
+                cout << start << " -> " << end << ": ";
+                if(count >= 3) {
+                    cout << RED << count << " vehicles (CONGESTED)" << RESET;
+                } else {
+                    cout << GREEN << count << " vehicles" << RESET;
+                }
+                cout << endl;
+            }
+        }
+    }
+}
     
 
     void updateAllVehicles() {
@@ -952,9 +1001,9 @@ int main() {
                         break;
                         
                     case '3':
-                        cout << "Congestion Status (Press ESC to return)\n";
+                        cout << "Vehicles per road (Press ESC to return)\n";
                         cout << "====================================\n";
-                        system.router->displayVehicles();
+                        system.router->displayVehiclesPerRoad();
                         break;
                         
                     case '4':
